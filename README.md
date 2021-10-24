@@ -1,4 +1,5 @@
 # kmeans
+# funnymonk
 
 A simple C routine for generic K-means calculations.
 
