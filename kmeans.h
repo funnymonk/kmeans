@@ -66,7 +66,7 @@ typedef enum {
 /*
 * Prototype for the distance calculating function
 */
-typedef double (*kmeans_distance_method) (const Pointer a, const Pointer b);
+typedef float (*kmeans_distance_method) (const Pointer a, const Pointer b);
 
 /*
 * Prototype for the centroid calculating function
@@ -77,6 +77,7 @@ typedef double (*kmeans_distance_method) (const Pointer a, const Pointer b);
 * @param centroid the object to write the centroid result into (already allocated)
 */
 typedef void (*kmeans_centroid_method) (const Pointer * objs, const int * clusters, size_t num_objs, int cluster, Pointer centroid);
+typedef int (*kmeans_convergence_method) (const Pointer *new_centres, const Pointer *old_centers, int num_centres);
 
 typedef struct kmeans_config
 {
@@ -86,6 +87,9 @@ typedef struct kmeans_config
 	/* Function returns the "centroid" of a collection of objects */
 	kmeans_centroid_method centroid_method;
 
+    /* Function returns 0 on convergence, else 1 */
+    kmeans_convergence_method convergence_method;
+
 	/* An array of objects to be analyzed. User allocates this array */
 	/* and is responsible for freeing it. */
 	/* For objects that are not capable of participating in the distance */
@@ -93,7 +97,7 @@ typedef struct kmeans_config
 	/* (for examples, database nulls, or geometry empties) use a NULL */
 	/* value in this list. All NULL values will be returned in the */
 	/* KMEANS_NULL_CLUSTER. */
-	Pointer * objs;
+	Pointer *objs;
 
 	/* Number of objects in the preceding array */
 	size_t num_objs;
@@ -103,7 +107,8 @@ typedef struct kmeans_config
 	/* unfortunately the algorithm is sensitive to starting */
 	/* points, so using a "better" set of starting points */
 	/* might be wise. User allocates and is responsible for freeing. */
-	Pointer * centers;
+	Pointer *centers;
+	Pointer *next_centers;
 
 	/* Number of means we are calculating, length of preceding array */
 	unsigned int k;

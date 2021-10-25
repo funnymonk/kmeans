@@ -1,7 +1,7 @@
 OBJS=kmeans.o
-EXE=example1 example2
+EXE=example1# example2
 
-CFLAGS=-g -O0
+CFLAGS=-g3 -O0
 
 all: $(EXE)
 
