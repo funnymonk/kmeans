@@ -46,6 +46,15 @@ update_r(kmeans_config *config)
 		for (cluster = 1; cluster < config->k; cluster++)
 		{
 			distance = (config->distance_method)(obj, config->centers[cluster]);
+#ifdef DEBUG_PRINT
+            printf("Distance of [%f, %f] from cluster %d = [%f, %f] = %f. Current : %f\n",
+                    ((float*)obj)[0], ((float*)obj)[1], 
+                    cluster,
+                    ((float*)(config->centers[cluster]))[0],
+                    ((float*)(config->centers[cluster]))[1],
+                    distance,
+                    curr_distance);
+#endif
 			if (distance < curr_distance)
 			{
 				curr_distance = distance;
@@ -67,15 +76,12 @@ update_means(kmeans_config *config)
 	{
 		/* Update the centroid for this cluster */
 		(config->centroid_method)(config->objs, config->clusters, config->num_objs, i, 
-                config->next_centers[i]);
+                config->centers[i]);
+#ifdef DEBUG_PRINT
+        printf("New centroid %d: [%f, %f]\n", i, ((float*)(config->centers[i]))[0], 
+                ((float*)(config->centers[i]))[1]);
+#endif
 	}
-}
-
-static void swap_centres(kmeans_config *config)
-{
-    Pointer *tmp_center = config->centers;
-    config->centers = config->next_centers;
-    config->next_centers = tmp_center;
 }
 
 kmeans_result
@@ -90,9 +96,7 @@ kmeans(kmeans_config *config)
 	assert(config->num_objs);
 	assert(config->distance_method);
 	assert(config->centroid_method);
-    assert(config->convergence_method);
 	assert(config->centers);
-	assert(config->next_centers);
 	assert(config->k);
 	assert(config->clusters);
 	assert(config->k <= config->num_objs);
@@ -125,8 +129,7 @@ kmeans(kmeans_config *config)
 		 * we are at a stable solution, so we can stop here
 		 */
 
-        /* NOTE : Scikit learn uses Frobenius Norm to determine convergence.
-         * Replacing the memcmp with Frobenius norm */
+        /* NOTE : We don't care about convergence. Only max_iterations */
 #if 0
 		if (memcmp(clusters_last, config->clusters, clusters_sz) == 0)
 		{
@@ -134,7 +137,6 @@ kmeans(kmeans_config *config)
 			config->total_iterations = iterations;
 			return KMEANS_OK;
 		}
-#endif
 
         if((config->convergence_method)(config->centers, config->next_centers, config->k) == 0)
         {
@@ -142,6 +144,7 @@ kmeans(kmeans_config *config)
 			config->total_iterations = iterations;
 			return KMEANS_OK;
         }
+#endif
 
 		if (iterations++ > config->max_iterations)
 		{
@@ -149,8 +152,6 @@ kmeans(kmeans_config *config)
 			config->total_iterations = iterations;
 			return KMEANS_EXCEEDED_MAX_ITERATIONS;
 		}
-
-        swap_centres(config);
 	}
 
 	kmeans_free(clusters_last);

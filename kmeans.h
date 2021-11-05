@@ -108,7 +108,6 @@ typedef struct kmeans_config
 	/* points, so using a "better" set of starting points */
 	/* might be wise. User allocates and is responsible for freeing. */
 	Pointer *centers;
-	Pointer *next_centers;
 
 	/* Number of means we are calculating, length of preceding array */
 	unsigned int k;
