@@ -2,10 +2,11 @@
 #include <stdio.h>
 
 #include "kmeans.h"
-#include "dataset.h"
+//#include "dataset.h"
+#include "dataset_8d.h"
 
 #define ARRAY_LEN(X)    (sizeof(X)/sizeof((X)[0]))
-#define DIM (2)
+#define DIM (8)
 
 static float d_distance(const Pointer a, const Pointer b)
 {
@@ -62,14 +63,17 @@ static void d_centroid(const Pointer * objs, const int * clusters, size_t num_ob
 int
 main(int nargs, char **args)
 {
-	float c[2][2] = {{5.0, 1.0}, {6.0, 6.0}};
+	float c[2][8] = {
+    {3.673064415363009871e+00,7.842842527838095101e+00,9.690638269043832409e+00,2.721014897817765288e+00,6.100443184789131834e+00,6.222161699622711595e+00,3.216597085650585441e+00,5.819027177689593877e+00},
+    {5.454086487568165609e+00,9.674906510200042220e+00,2.205720657951358632e+00,3.023838573736853164e+00,6.111250410705403979e+00,9.669943546798972278e+00,9.296398730435974755e+00,8.188045578492848975e+00},
+    };
 	kmeans_config config;
 	kmeans_result result;
 	int i, dim, num_in_0;
 
 	config.num_objs = ARRAY_LEN(dataset);
 	config.k = 2;
-	config.max_iterations = 100;
+	config.max_iterations = 1000;
 	config.distance_method = d_distance;
 	config.centroid_method = d_centroid;
 
