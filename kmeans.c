@@ -29,29 +29,29 @@ update_r(kmeans_config *config)
 	{
 		double distance, curr_distance;
 		int cluster, curr_cluster;
-		Pointer obj;
+		float* obj;
 
 		assert(config->objs != NULL);
 		assert(config->num_objs > 0);
 		assert(config->centers);
 		assert(config->clusters);
 
-		obj = config->objs[i];
+		obj = config->objs + i*DIM;
 
 		/* Initialize with distance to first cluster */
-		curr_distance = (config->distance_method)(obj, config->centers[0]);
+		curr_distance = (config->distance_method)(obj, config->centers);
 		curr_cluster = 0;
 
 		/* Check all other cluster centers and find the nearest */
 		for (cluster = 1; cluster < config->k; cluster++)
 		{
-			distance = (config->distance_method)(obj, config->centers[cluster]);
+			distance = (config->distance_method)(obj, config->centers + cluster*DIM);
 #ifdef DEBUG_PRINT
             printf("Distance of [%f, %f] from cluster %d = [%f, %f] = %f. Current : %f\n",
-                    ((float*)obj)[0], ((float*)obj)[1], 
+                    obj[0], obj[1], 
                     cluster,
-                    ((float*)(config->centers[cluster]))[0],
-                    ((float*)(config->centers[cluster]))[1],
+                    (config->centers + cluster*DIM)[0],
+                    (config->centers + cluster*DIM)[1],
                     distance,
                     curr_distance);
 #endif
@@ -76,10 +76,10 @@ update_means(kmeans_config *config)
 	{
 		/* Update the centroid for this cluster */
 		(config->centroid_method)(config->objs, config->clusters, config->num_objs, i, 
-                config->centers[i]);
+                config->centers + i*DIM);
 #ifdef DEBUG_PRINT
-        printf("New centroid %d: [%f, %f]\n", i, ((float*)(config->centers[i]))[0], 
-                ((float*)(config->centers[i]))[1]);
+        printf("New centroid %d: [%f, %f]\n", i, (config->centers + i*DIM)[0], 
+                (config->centers + i*DIM)[1]);
 #endif
 	}
 }

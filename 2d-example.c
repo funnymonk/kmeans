@@ -6,9 +6,8 @@
 #include "dataset_8d.h"
 
 #define ARRAY_LEN(X)    (sizeof(X)/sizeof((X)[0]))
-#define DIM (8)
 
-static float d_distance(const Pointer a, const Pointer b)
+static float d_distance(const float* a, const float* b)
 {
 	float *da = (float*)a;
 	float *db = (float*)b;
@@ -22,12 +21,12 @@ static float d_distance(const Pointer a, const Pointer b)
     return distance;
 }
 
-static void d_centroid(const Pointer * objs, const int * clusters, size_t num_objs, int cluster, Pointer centroid)
+static void d_centroid(float* objs, int * clusters, size_t num_objs, int cluster, float* centroid)
 {
 	int i, dim;
 	int num_cluster = 0;
 	float sum = 0;
-	float **floats = (float**)objs;
+	float *entry;
 	float *dcentroid = (float*)centroid;
 
 	if (num_objs <= 0) return;
@@ -36,12 +35,13 @@ static void d_centroid(const Pointer * objs, const int * clusters, size_t num_ob
 
 	for (i = 0; i < num_objs; i++)
 	{
+        entry = objs + i*DIM;
 		/* Only process objects of interest */
 		if (clusters[i] != cluster)
 			continue;
 
         for(dim = 0; dim<DIM; dim++){
-            dcentroid[dim] += floats[i][dim];
+            dcentroid[dim] += entry[dim];
         }
 
 		num_cluster++;
@@ -77,21 +77,10 @@ main(int nargs, char **args)
 	config.distance_method = d_distance;
 	config.centroid_method = d_centroid;
 
-	config.objs = calloc(config.num_objs, sizeof(Pointer));
-	config.centers = calloc(config.k, sizeof(Pointer)); 
-	config.clusters = calloc(config.num_objs, sizeof(int));
+	config.clusters = malloc(config.num_objs * sizeof(int));
 
-	/* populate objs */
-	for (i = 0; i < config.num_objs; i++)
-	{
-		config.objs[i] = &dataset[i];
-	}
-
-	/* populate centroids */
-	for (i = 0; i < config.k; i++)
-	{
-		config.centers[i] = &c[i];
-	}
+    config.centers = &c[0][0];
+    config.objs = &dataset[0][0];
 
 	/* run k-means */
 	result = kmeans(&config);
@@ -101,10 +90,7 @@ main(int nargs, char **args)
 	for (i = 0; i < config.num_objs; i++)
 	{
 #ifdef DEBUG_PRINT
-		if (config.objs[i])
-			printf("%f [%d]\n", *(float*)(config.objs[i]), config.clusters[i]);
-		else
-			printf("NN Dafuq [%d]\n", config.clusters[i]);
+        printf("%d [%d]\n", i, config.clusters[i]);
 #endif
         if(config.clusters[i] == 0)
             num_in_0++;
@@ -112,15 +98,14 @@ main(int nargs, char **args)
 
 	for (i = 0; i < config.k; i++){
         printf("Centroid %d [", i);
+        float *center = config.centers + i*DIM;
         for(dim = 0; dim<DIM; dim++){
-            printf("%f, ", ((float**)(config.centers))[i][dim]);
+            printf("%f, ", center[dim]);
         }
         printf("]\n");
     }
     printf("Took %d iterations, num in 0 = %d\n", 
             config.total_iterations, num_in_0);
 
-	free(config.objs);
 	free(config.clusters);
-	free(config.centers);
 }
