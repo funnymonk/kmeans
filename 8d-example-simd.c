@@ -41,10 +41,10 @@ static __inline__ unsigned long long rdtsc(void) {
 }
 
 
-static void transpose_8(float *dest, float *src, int dst_offest)
+static void transpose_8_kernel(float *dest, float *src, int dst_offest)
 {
-    __m256i r0, r1, r2, r3, r4, r5, r6, r7;
-    __m256i tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
+    register __m256i r0, r1, r2, r3, r4, r5, r6, r7;
+    register __m256i tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
     float *dest0, *dest1, *dest2,  *dest3,  *dest4,  *dest5,  *dest6,  *dest7;
     float *d;
 
@@ -116,12 +116,13 @@ static void d_transpose(float *transpose, float *objs, int num_objs)
     int offset = num_objs; 
     
     while(n<num_objs/DIM){
-        transpose_8(dest, src, offset);
+        transpose_8_kernel(dest, src, offset);
         n++;
         src += DIM*8;
         dest += DIM;
     }
 
+#if 0
     for(int i=0; i<num_objs; i++){
         printf("row %d : ", i);
         for(int j=0; j<DIM; j++){
@@ -129,22 +130,102 @@ static void d_transpose(float *transpose, float *objs, int num_objs)
         }
         printf("\n");
     }
+#endif
+}
+
+static void distance_7_kernel(float *dest, float *src, float *c_src, int src_offset)
+{
+    register __m256 c;
+    register __m256 r0, r1, r2, r3, r4, r5, r6;
+    register __m256 acc0, acc1, acc2, acc3, acc4, acc5, acc6;
+    float *d;
+
+    /* Init accumulaors */
+    acc0 = _mm256_setzero_ps();
+    acc1 = _mm256_setzero_ps();
+    acc2 = _mm256_setzero_ps();
+    acc3 = _mm256_setzero_ps();
+    acc4 = _mm256_setzero_ps();
+    acc5 = _mm256_setzero_ps();
+    acc6 = _mm256_setzero_ps();
+
+    for(int i=0; i<DIM; i++){
+        c = _mm256_broadcast_ss(c_src + i);
+
+        /* Load tranposed points */
+        r0 = _mm256_loadu_ps(src);
+        r1 = _mm256_loadu_ps(src+8);
+        r2 = _mm256_loadu_ps(src+16);
+        r3 = _mm256_loadu_ps(src+24);
+        r4 = _mm256_loadu_ps(src+32);
+        r5 = _mm256_loadu_ps(src+40);
+        r6 = _mm256_loadu_ps(src+48);
+
+        //DEBUGF(r0);
+        //DEBUGF(r6);
+        /* Get diff */
+        r0 = _mm256_sub_ps(r0, c);
+        r1 = _mm256_sub_ps(r1, c);
+        r2 = _mm256_sub_ps(r2, c);
+        r3 = _mm256_sub_ps(r3, c);
+        r4 = _mm256_sub_ps(r4, c);
+        r5 = _mm256_sub_ps(r5, c);
+        r6 = _mm256_sub_ps(r6, c);
+
+        /* Accumulate */
+        acc0 = _mm256_fmadd_ps(r0, r0, acc0);
+        acc1 = _mm256_fmadd_ps(r1, r1, acc1);
+        acc2 = _mm256_fmadd_ps(r2, r2, acc2);
+        acc3 = _mm256_fmadd_ps(r3, r3, acc3);
+        acc4 = _mm256_fmadd_ps(r4, r4, acc4);
+        acc5 = _mm256_fmadd_ps(r5, r5, acc5);
+        acc6 = _mm256_fmadd_ps(r6, r6, acc6);
+
+        /* Now we have distance^2 for 56 points in 1 dim 
+         * Loop to get all dims */
+
+        src += src_offset;
+    }
+
+    //DEBUGF(acc0);
+
+    /* Now store out computed distance for this cluster */
+    _mm256_storeu_ps(dest, acc0);
+    _mm256_storeu_ps(dest+8, acc1);
+    _mm256_storeu_ps(dest+16, acc2);
+    _mm256_storeu_ps(dest+24, acc3);
+    _mm256_storeu_ps(dest+32, acc4);
+    _mm256_storeu_ps(dest+40, acc5);
+    _mm256_storeu_ps(dest+48, acc6);
 
 
 }
 
-static float d_distance(const float* a, const float* b)
+static float d_distance(kmeans_config *config)
 {
-	float *da = (float*)a;
-	float *db = (float*)b;
-    float distance = 0;
     int i;
 
-    for(i=0; i<DIM; i++){
-        distance += ((da[i] - db[i]) * (da[i] - db[i]));
-    }
+    float *src;
 
-    return distance;
+    unsigned long long t0, t1, sum;
+
+    t0 = rdtsc();
+    for(int z=0; z<10000; z++){
+        float *dest = config->distance_arr;
+        int src_offset = config->num_objs;
+        for(int k=0; k < config->k; k++) {
+            for(int j=0; j<config->num_objs/(DIM*DISTANCE_KERNEL_NUM_POINTS); j++){
+                src = config->transpose_arr + DIM*DISTANCE_KERNEL_NUM_POINTS*j;
+                distance_7_kernel(dest, src, config->centers + k*DIM, src_offset);
+                dest += DIM*DISTANCE_KERNEL_NUM_POINTS;
+            }
+        }
+    }
+    t1 = rdtsc();
+    printf("Cycles:%d ,FLOPS/cycle : %f\n", t1-t0, 
+            (config->num_objs*DIM*3*config->k)/(((float)(t1-t0))/10000));
+    assert(0);
+    
 }
 
 static void d_centroid(float* objs, int * clusters, size_t num_objs, int cluster, float* centroid)
@@ -191,8 +272,8 @@ main(int nargs, char **args)
 {
     unsigned long long t0, t1, sum;
 	float c[2][8] = {
-    {3.673064415363009871e+00,7.842842527838095101e+00,9.690638269043832409e+00,2.721014897817765288e+00,6.100443184789131834e+00,6.222161699622711595e+00,3.216597085650585441e+00,5.819027177689593877e+00},
-    {5.454086487568165609e+00,9.674906510200042220e+00,2.205720657951358632e+00,3.023838573736853164e+00,6.111250410705403979e+00,9.669943546798972278e+00,9.296398730435974755e+00,8.188045578492848975e+00},
+        {0},
+        {1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
     };
 	kmeans_config config;
 	kmeans_result result;
@@ -204,6 +285,8 @@ main(int nargs, char **args)
 	config.distance_method = d_distance;
 	config.centroid_method = d_centroid;
     config.transpose_method = d_transpose;
+    config.transpose_arr = NULL;
+    config.distance_arr = NULL; 
 
     printf("%d\n", config.num_objs);
 	config.clusters = malloc(config.num_objs * sizeof(int));

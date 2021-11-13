@@ -20,8 +20,13 @@
 #include <pthread.h>
 #endif
 
-float *transpose_arr;
+static void update_distances(kmeans_config *config)
+{
+    /* This handles computation for 2 cluster */
+    (config->distance_method)(config);
+}
 
+#if 0
 static void
 update_r(kmeans_config *config)
 {
@@ -68,6 +73,7 @@ update_r(kmeans_config *config)
 		config->clusters[i] = curr_cluster;
 	}
 }
+#endif
 
 static void
 update_means(kmeans_config *config)
@@ -102,11 +108,13 @@ kmeans(kmeans_config *config)
 	assert(config->k);
 	assert(config->clusters);
 	assert(config->k <= config->num_objs);
+    assert(config->transpose_arr == NULL);
+    assert(config->distance_arr == NULL);
     
-    transpose_arr = malloc(config->num_objs * sizeof(float) * DIM);
-    assert(transpose_arr);
+    config->transpose_arr = malloc(config->num_objs * sizeof(float) * DIM);
+    config->distance_arr = malloc(config->num_objs * sizeof(float) * DIM * config->k);
 
-    (config->transpose_method)(transpose_arr, config->objs, config->num_objs);
+    (config->transpose_method)(config->transpose_arr, config->objs, config->num_objs);
 
 	/* Zero out cluster numbers, just in case user forgets */
 	memset(config->clusters, 0, clusters_sz);
@@ -123,12 +131,14 @@ kmeans(kmeans_config *config)
 
 	while (1)
 	{
-#if 0
-		/* Store the previous state of the clustering */
-		memcpy(clusters_last, config->clusters, clusters_sz);
-#endif
+        /* Compute distance of each point from the clusters */
+		update_distances(config);
 
-		update_r(config);
+        /* Compute new cluster assignments */
+        /*TODO*/
+		//update_centers(config);
+
+        /* Recompute cluster centers */
 		update_means(config);
 
 		/*

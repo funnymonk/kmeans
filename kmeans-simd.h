@@ -55,7 +55,9 @@
 #define kmeans_malloc(size) malloc(size)
 #define kmeans_free(ptr) free(ptr)
 
+/* Our defines */
 #define DIM (8)
+#define DISTANCE_KERNEL_NUM_POINTS (7)
 
 typedef enum {
 	KMEANS_OK,
@@ -66,7 +68,8 @@ typedef enum {
 /*
 * Prototype for the distance calculating function
 */
-typedef float (*kmeans_distance_method) (const float* a, const float* b);
+extern struct kmeans_config;
+typedef float (*kmeans_distance_method) (struct kmeans_config *config);
 
 /*
 * Prototype for the centroid calculating function
@@ -125,6 +128,8 @@ typedef struct kmeans_config
 	/* Array to fill in with cluster numbers. User allocates and frees. */
 	int * clusters;
 
+    float *transpose_arr;
+    float *distance_arr;
 } kmeans_config;
 
 /* This is where the magic happens. */

@@ -2,7 +2,7 @@ OBJS=kmeans.o
 SIMDOBJS=kmeans-simd.o
 EXE=2d-example 2d-example-simd #example1# example2
 
-CFLAGS=-g3 -O0 -std=c99 -mfma -mavx -mavx2
+CFLAGS=-g3 -O3 -std=c99 -mfma -mavx -mavx2
 
 all: $(EXE)
 
