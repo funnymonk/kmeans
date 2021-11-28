@@ -41,7 +41,7 @@ static __inline__ unsigned long long rdtsc(void) {
 }
 
 
-static void transpose_8_kernel(float *dest, float *src, int dst_offest)
+static void transpose_8_kernel(float *dest, float *src, int src_offset, int dst_offest)
 {
     register __m256i r0, r1, r2, r3, r4, r5, r6, r7;
     register __m256i tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
@@ -58,13 +58,13 @@ static void transpose_8_kernel(float *dest, float *src, int dst_offest)
     dest7 = dest + 7*dst_offest;
 
     r0 = _mm256_loadu_si256(src);
-    r1 = _mm256_loadu_si256(src+8);
-    r2 = _mm256_loadu_si256(src+16);
-    r3 = _mm256_loadu_si256(src+24);
-    r4 = _mm256_loadu_si256(src+32);
-    r5 = _mm256_loadu_si256(src+40);
-    r6 = _mm256_loadu_si256(src+48);
-    r7 = _mm256_loadu_si256(src+56);
+    r1 = _mm256_loadu_si256(src+1*src_offset);
+    r2 = _mm256_loadu_si256(src+2*src_offset);
+    r3 = _mm256_loadu_si256(src+3*src_offset);
+    r4 = _mm256_loadu_si256(src+4*src_offset);
+    r5 = _mm256_loadu_si256(src+5*src_offset);
+    r6 = _mm256_loadu_si256(src+6*src_offset);
+    r7 = _mm256_loadu_si256(src+7*src_offset);
 
     tmp0 = _mm256_unpacklo_epi32(r0, r1);
     tmp1 = _mm256_unpackhi_epi32(r0, r1);
@@ -104,23 +104,39 @@ static void transpose_8_kernel(float *dest, float *src, int dst_offest)
 
 }
 
-static void d_transpose(float *transpose, float *objs, int num_objs)
+static void d_transpose(float *transpose, float *objs, int num_objs, 
+        int src_offset, int src_increment, 
+        int dst_offset, int dst_increment)
 {
+
+    unsigned long long t0, t1, sum;
+    printf("Num = %d\n", num_objs);
     /* Procedure : 
      * 1. Load 8 values
      * 2.
      * */
-    float *dest = transpose;
-    float *src = objs;
-    int n = 0;
-    int offset = num_objs; 
-    
-    while(n<num_objs/DIM){
-        transpose_8_kernel(dest, src, offset);
-        n++;
-        src += DIM*8;
-        dest += DIM;
+#ifdef PROFILE
+    t0 = rdtsc();
+    for(int z=0; z<10000; z++){
+#endif
+        float *dest = transpose;
+        float *src = objs;
+        int n = 0;
+        
+        while(n<num_objs/DIM){
+            transpose_8_kernel(dest, src, src_offset, dst_offset);
+            n++;
+            src += src_increment;
+            dest += dst_increment;
+        }
+#ifdef PROFILE
     }
+    t1 = rdtsc();
+    printf("Cycles:%d ,FLOPS/cycle : %f\n", t1-t0, 
+            (num_objs*DIM)/(((float)(t1-t0))/10000));
+    assert(0);
+#endif
+    
 
 #if 0
     for(int i=0; i<num_objs; i++){
@@ -130,6 +146,7 @@ static void d_transpose(float *transpose, float *objs, int num_objs)
         }
         printf("\n");
     }
+    assert(0);
 #endif
 }
 
@@ -209,8 +226,10 @@ static float d_distance(kmeans_config *config)
 
     unsigned long long t0, t1, sum;
 
+#ifdef PROFILE
     t0 = rdtsc();
     for(int z=0; z<10000; z++){
+#endif
         float *dest = config->distance_arr;
         int src_offset = config->num_objs;
         for(int k=0; k < config->k; k++) {
@@ -220,73 +239,353 @@ static float d_distance(kmeans_config *config)
                 dest += DIM*DISTANCE_KERNEL_NUM_POINTS;
             }
         }
+#ifdef PROFILE
     }
     t1 = rdtsc();
     printf("Cycles:%d ,FLOPS/cycle : %f\n", t1-t0, 
             (config->num_objs*DIM*3*config->k)/(((float)(t1-t0))/10000));
     assert(0);
-    
+#endif
+#if 0
+    printf("First and last distances\n");
+    for(int i =0; i<config->k; i++){
+        printf("for i = %d\n", i);
+        for(int j=0; j<DIM; j++){
+            printf("%f  ", config->distance_arr[i*config->num_objs + j]);
+        }
+        printf("\n");
+        for(int j=0; j<DIM; j++){
+            printf("%f  ", config->distance_arr[i*config->num_objs + config->num_objs-DIM+j]);
+        }
+        printf("\n");
+    }
+    assert(0);
+#endif
+
 }
 
-static void d_centroid(float* objs, int * clusters, size_t num_objs, int cluster, float* centroid)
+static void compare_8_kernel(float *dest, float *d_src, float *dt_src, int d_offset)
 {
-	int i, dim;
-	int num_cluster = 0;
-	float sum = 0;
-	float *entry;
-	float *dcentroid = (float*)centroid;
+    register __m256 r0, r1, r2, r3, r4, r5, r6, r7;
+    register __m256 t0, t1, t2, t3, t4, t5, t6, t7;
+    register __m256 min;
 
-	if (num_objs <= 0) return;
-    for(dim = 0; dim<DIM; dim++)
-        dcentroid[dim] = 0.0;
+    /* Load distances of 8 points from 8 clusters */
+    r0 = _mm256_loadu_ps(d_src);
+    r1 = _mm256_loadu_ps(d_src+1*d_offset);
+    r2 = _mm256_loadu_ps(d_src+2*d_offset);
+    r3 = _mm256_loadu_ps(d_src+3*d_offset);
+    r4 = _mm256_loadu_ps(d_src+4*d_offset);
+    r5 = _mm256_loadu_ps(d_src+5*d_offset);
+    r6 = _mm256_loadu_ps(d_src+6*d_offset);
+    r7 = _mm256_loadu_ps(d_src+7*d_offset);
 
-	for (i = 0; i < num_objs; i++)
-	{
-        entry = objs + i*DIM;
-		/* Only process objects of interest */
-		if (clusters[i] != cluster)
-			continue;
+    /* Find min */
+    t0 = _mm256_min_ps(r0, r1); 
+    t2 = _mm256_min_ps(r2, r3); 
+    t4 = _mm256_min_ps(r4, r5); 
+    t6 = _mm256_min_ps(r6, r7); 
+    t0 = _mm256_min_ps(t0, t2); 
+    t4 = _mm256_min_ps(t4, t6); 
+    min = _mm256_min_ps(t0, t4); 
 
-        for(dim = 0; dim<DIM; dim++){
-            dcentroid[dim] += entry[dim];
-        }
+    /* Perform transpose */
+    t0 = (__m256)_mm256_unpacklo_epi32((__m256i)r0, (__m256i)r1);
+    t1 = (__m256)_mm256_unpackhi_epi32((__m256i)r0, (__m256i)r1);
+    t2 = (__m256)_mm256_unpacklo_epi32((__m256i)r2, (__m256i)r3);
+    t3 = (__m256)_mm256_unpackhi_epi32((__m256i)r2, (__m256i)r3);
+    t4 = (__m256)_mm256_unpacklo_epi32((__m256i)r4, (__m256i)r5);
+    t5 = (__m256)_mm256_unpackhi_epi32((__m256i)r4, (__m256i)r5);
+    t6 = (__m256)_mm256_unpacklo_epi32((__m256i)r6, (__m256i)r7);
+    t7 = (__m256)_mm256_unpackhi_epi32((__m256i)r6, (__m256i)r7);
 
-		num_cluster++;
-	}
+    r0 = (__m256)_mm256_unpacklo_epi64((__m256i)t0, (__m256i)t2);
+    r1 = (__m256)_mm256_unpackhi_epi64((__m256i)t0, (__m256i)t2);
+    r2 = (__m256)_mm256_unpacklo_epi64((__m256i)t1, (__m256i)t3);
+    r3 = (__m256)_mm256_unpackhi_epi64((__m256i)t1, (__m256i)t3);
+    r4 = (__m256)_mm256_unpacklo_epi64((__m256i)t4, (__m256i)t6);
+    r5 = (__m256)_mm256_unpackhi_epi64((__m256i)t4, (__m256i)t6);
+    r6 = (__m256)_mm256_unpacklo_epi64((__m256i)t5, (__m256i)t7);
+    r7 = (__m256)_mm256_unpackhi_epi64((__m256i)t5, (__m256i)t7);
 
-	if (num_cluster)
-	{
-#ifdef DEBUG_PRINT
-        printf("Num cluster = %d, Sum = [%f, %f]\n", 
-                num_cluster, dcentroid[0], dcentroid[1]);
+    t0 = (__m256)_mm256_permute2f128_si256((__m256i)r0, (__m256i)r4, 0x20);
+    t1 = (__m256)_mm256_permute2f128_si256((__m256i)r1, (__m256i)r5, 0x20);
+    t2 = (__m256)_mm256_permute2f128_si256((__m256i)r2, (__m256i)r6, 0x20);
+    t3 = (__m256)_mm256_permute2f128_si256((__m256i)r3, (__m256i)r7, 0x20);
+    t4 = (__m256)_mm256_permute2f128_si256((__m256i)r0, (__m256i)r4, 0x31);
+    t5 = (__m256)_mm256_permute2f128_si256((__m256i)r1, (__m256i)r5, 0x31);
+    t6 = (__m256)_mm256_permute2f128_si256((__m256i)r2, (__m256i)r6, 0x31);
+    t7 = (__m256)_mm256_permute2f128_si256((__m256i)r3, (__m256i)r7, 0x31);
+
+    r5 = _mm256_set1_ps(1.0);
+
+    /* broadcast mins */
+    r0 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(0));
+    r1 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(1));
+    r2 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(2));
+    r3 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(3));
+    r4 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(4));
+
+    /* Compare */
+    r0 = _mm256_cmp_ps(t0, r0, _CMP_EQ_OQ);
+    r1 = _mm256_cmp_ps(t1, r1, _CMP_EQ_OQ);
+    r2 = _mm256_cmp_ps(t2, r2, _CMP_EQ_OQ);
+    r3 = _mm256_cmp_ps(t3, r3, _CMP_EQ_OQ);
+    r4 = _mm256_cmp_ps(t4, r4, _CMP_EQ_OQ);
+
+    /* And */
+    r0 = _mm256_and_ps(r0, r5);
+    r1 = _mm256_and_ps(r1, r5);
+    r2 = _mm256_and_ps(r2, r5);
+    r3 = _mm256_and_ps(r3, r5);
+    r4 = _mm256_and_ps(r4, r5);
+
+    /* Store out */
+    _mm256_storeu_ps(dest, r0);
+    _mm256_storeu_ps(dest+1*8, r1);
+    _mm256_storeu_ps(dest+2*8, r2);
+    _mm256_storeu_ps(dest+3*8, r3);
+    _mm256_storeu_ps(dest+4*8, r4);
+
+    /* broadcast mins. r0, r1, r2 no longer needed */
+    r0 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(5));
+    r1 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(6));
+    r2 = _mm256_permutevar8x32_ps(min, _mm256_set1_epi32(7));
+
+    /* Compare */
+    r0 = _mm256_cmp_ps(t5, r0, _CMP_EQ_OQ);
+    r1 = _mm256_cmp_ps(t6, r1, _CMP_EQ_OQ);
+    r2 = _mm256_cmp_ps(t7, r2, _CMP_EQ_OQ);
+
+    /* And */
+    r0 = _mm256_and_ps(r0, r5);
+    r1 = _mm256_and_ps(r1, r5);
+    r2 = _mm256_and_ps(r2, r5);
+
+    /* Store out */
+    _mm256_storeu_ps(dest+5*8, r0);
+    _mm256_storeu_ps(dest+6*8, r1);
+    _mm256_storeu_ps(dest+7*8, r2);
+}
+
+static void d_centroid(kmeans_config *config)
+{
+    unsigned long long t0, t1, sum;
+
+#if 0
+    t0 = rdtsc();
+    for(int z=0; z<100; z++){
 #endif
-        for(dim = 0; dim<DIM; dim++){
-            dcentroid[dim] /= num_cluster;
+        int d_offset = config->num_objs;
+        float *dest = config->mask_arr;
+        float *d_src = config->distance_arr;
+        float *dt_src = config->distance_transpose_arr;
+        for(int i=0; i<config->num_objs/CENTROID_KERNEL_NUM_POINTS; i++){
+            compare_8_kernel(dest, d_src, dt_src, d_offset);
+            dest += CENTROID_KERNEL_NUM_POINTS*DIM;
+            d_src += DIM;
+            dt_src += CENTROID_KERNEL_NUM_POINTS*DIM;
         }
-	}
-	return;
+#if 0
+    }
+    t1 = rdtsc();
+    printf("Cycles:%d ,FLOPS/cycle : %f\n", t1-t0, 
+            (config->num_objs*54)/(((float)(t1-t0))/100));
+    assert(0);
+
+#endif
+#if 0
+    printf("Mask arr : \n");
+    for(int i=0; i<8;i++){
+        printf("At i=%d\n", i);
+        for(int j=0; j<DIM;j++){
+            printf("%d : %f\n", i, config->mask_arr[i*DIM + j]);
+        }
+    }
+    printf("Last Mask arr : \n");
+    for(int i=0; i<8;i++){
+        printf("At i=%d\n", i);
+        for(int j=0; j<DIM;j++){
+            printf("%d : %f\n", i, config->mask_arr[config->num_objs*DIM - DIM*DIM + i*DIM + j]);
+        }
+    }
+    assert(0);
+#endif
+}
+
+static void d_means(kmeans_config *config)
+{
+    float *src, *dest, *msrc;
+    register __m256 c0, c1, c2, c3, c4, c5, c6, c7;
+    register __m256 mask;
+    register __m256 macc;
+    register __m256 r0, r1, r2, r3, r4;
+    float *d;
+
+    unsigned long long t0, t1, sum;
+        
+#if 0
+    t0 = rdtsc();
+    for(int z=0; z<1000; z++){
+#endif
+    c0 = _mm256_setzero_ps();
+    c1 = _mm256_setzero_ps();
+    c2 = _mm256_setzero_ps();
+    c3 = _mm256_setzero_ps();
+    c4 = _mm256_setzero_ps();
+    c5 = _mm256_setzero_ps();
+    c6 = _mm256_setzero_ps();
+    c7 = _mm256_setzero_ps();
+    macc = _mm256_setzero_ps();
+    src = config->objs;
+    msrc = config->mask_arr;
+
+    for(int i=0; i<config->num_objs; i++){
+        /* Add dimensions for 1 point*/
+        mask = _mm256_loadu_ps(msrc);
+
+        r0 = _mm256_broadcast_ss(src);
+        r1 = _mm256_broadcast_ss(src+1);
+        r2 = _mm256_broadcast_ss(src+2);
+        r3 = _mm256_broadcast_ss(src+3);
+        r4 = _mm256_broadcast_ss(src+4);
+
+        c0 = _mm256_fmadd_ps(r0, mask, c0);
+        r0 = _mm256_broadcast_ss(src+5);
+        c1 = _mm256_fmadd_ps(r1, mask, c1);
+        r1 = _mm256_broadcast_ss(src+6);
+        c2 = _mm256_fmadd_ps(r2, mask, c2);
+        r2 = _mm256_broadcast_ss(src+7);
+        c3 = _mm256_fmadd_ps(r3, mask, c3);
+        c4 = _mm256_fmadd_ps(r4, mask, c4);
+        c5 = _mm256_fmadd_ps(r0, mask, c5);
+        c6 = _mm256_fmadd_ps(r1, mask, c6);
+        c7 = _mm256_fmadd_ps(r2, mask, c7);
+
+        macc = _mm256_add_ps(mask, macc);
+        msrc += DIM;
+        src += DIM;
+    }
+#if 0
+    }
+    t1 = rdtsc();
+    printf("Cycles:%d ,FLOPS/cycle : %f\n", t1-t0, 
+            (config->num_objs*DIM*2)/(((float)(t1-t0))/1000));
+#endif
+
+#if 1
+    __m256 tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
+    __m256 b0, b1, b2, b3, b4, b5, b6, b7;
+
+    tmp0 = _mm256_unpacklo_ps(c0, c1);
+    tmp1 = _mm256_unpackhi_ps(c0, c1);
+    tmp2 = _mm256_unpacklo_ps(c2, c3);
+    tmp3 = _mm256_unpackhi_ps(c2, c3);
+    tmp4 = _mm256_unpacklo_ps(c4, c5);
+    tmp5 = _mm256_unpackhi_ps(c4, c5);
+    tmp6 = _mm256_unpacklo_ps(c6, c7);
+    tmp7 = _mm256_unpackhi_ps(c6, c7);
+
+    c0 = (__m256)_mm256_unpacklo_pd((__m256d)tmp0, (__m256d)tmp2);
+    c1 = (__m256)_mm256_unpackhi_pd((__m256d)tmp0, (__m256d)tmp2);
+    c2 = (__m256)_mm256_unpacklo_pd((__m256d)tmp1, (__m256d)tmp3);
+    c3 = (__m256)_mm256_unpackhi_pd((__m256d)tmp1, (__m256d)tmp3);
+    c4 = (__m256)_mm256_unpacklo_pd((__m256d)tmp4, (__m256d)tmp6);
+    c5 = (__m256)_mm256_unpackhi_pd((__m256d)tmp4, (__m256d)tmp6);
+    c6 = (__m256)_mm256_unpacklo_pd((__m256d)tmp5, (__m256d)tmp7);
+    c7 = (__m256)_mm256_unpackhi_pd((__m256d)tmp5, (__m256d)tmp7);
+
+    tmp0 = _mm256_permute2f128_ps(c0, c4, 0x20);
+    tmp1 = _mm256_permute2f128_ps(c1, c5, 0x20);
+    tmp2 = _mm256_permute2f128_ps(c2, c6, 0x20);
+    tmp3 = _mm256_permute2f128_ps(c3, c7, 0x20);
+    tmp4 = _mm256_permute2f128_ps(c0, c4, 0x31);
+    tmp5 = _mm256_permute2f128_ps(c1, c5, 0x31);
+    tmp6 = _mm256_permute2f128_ps(c2, c6, 0x31);
+    tmp7 = _mm256_permute2f128_ps(c3, c7, 0x31);
+    
+    b0 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(0));
+    b1 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(1));
+    b2 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(2));
+    b3 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(3));
+    b4 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(4));
+
+    d = &b0;
+    if(d[0])
+        tmp0 = _mm256_div_ps(tmp0, b0);
+
+    d = &b1;
+    if(d[0])
+        tmp1 = _mm256_div_ps(tmp1, b1);
+
+    d = &b2;
+    if(d[0])
+        tmp2 = _mm256_div_ps(tmp2, b2);
+
+    d = &b3;
+    if(d[0])
+        tmp3 = _mm256_div_ps(tmp3, b3);
+
+    d = &b4;
+    if(d[0])
+        tmp4 = _mm256_div_ps(tmp4, b4);
+
+    b0 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(5));
+    b1 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(6));
+    b2 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(7));
+
+    d = &b0;
+    if(d[0])
+        tmp5 = _mm256_div_ps(tmp5, b0);
+    d = &b1;
+    if(d[0])
+        tmp6 = _mm256_div_ps(tmp6, b1);
+    d = &b2;
+    if(d[0])
+        tmp7 = _mm256_div_ps(tmp7, b2);
+
+    dest = config->centers;
+    _mm256_storeu_ps(dest, tmp0);
+    _mm256_storeu_ps(dest+8, tmp1);
+    _mm256_storeu_ps(dest+16, tmp2);
+    _mm256_storeu_ps(dest+24, tmp3);
+    _mm256_storeu_ps(dest+32, tmp4);
+    _mm256_storeu_ps(dest+40, tmp5);
+    _mm256_storeu_ps(dest+48, tmp6);
+    _mm256_storeu_ps(dest+56, tmp7);
+#endif
+    //assert(0);
+
 }
 
 int
 main(int nargs, char **args)
 {
     unsigned long long t0, t1, sum;
-	float c[2][8] = {
-        {0},
+	float c[][8] = {
+        {1.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0},
         {1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
+        {2.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
+        {3.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
+        {4.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
+        {5.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
+        {6.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
+        {7.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0},
     };
 	kmeans_config config;
 	kmeans_result result;
 	int i, dim, num_in_0;
 
 	config.num_objs = ARRAY_LEN(dataset);
-	config.k = 2;
+	config.k = 8;
 	config.max_iterations = 1000;
 	config.distance_method = d_distance;
 	config.centroid_method = d_centroid;
+	config.means_method = d_means;
     config.transpose_method = d_transpose;
     config.transpose_arr = NULL;
     config.distance_arr = NULL; 
+    config.mask_arr = NULL; 
 
     printf("%d\n", config.num_objs);
 	config.clusters = malloc(config.num_objs * sizeof(int));
@@ -302,15 +601,18 @@ main(int nargs, char **args)
 	result = kmeans(&config);
     t1 = rdtsc();
 
-    num_in_0 = 0;
+    int fin_arr[DIM] = {0};
 	/* print result */
 	for (i = 0; i < config.num_objs; i++)
 	{
-#ifdef DEBUG_PRINT
-        printf("%d [%d]\n", i, config.clusters[i]);
-#endif
-        if(config.clusters[i] == 0)
-            num_in_0++;
+        int done = 0;
+        for(int j=0; j<DIM; j++){
+            if(config.mask_arr[i*DIM + j] == 1.0){
+                assert(done == 0);
+                done = 1;
+                fin_arr[j]++;
+            }
+        }
 	}
 
 	for (i = 0; i < config.k; i++){
@@ -321,8 +623,14 @@ main(int nargs, char **args)
         }
         printf("]\n");
     }
-    printf("Took %d iterations, cycles = %ld, num in 0 = %d\n", 
-            config.total_iterations, t1 - t0, num_in_0);
+    printf("Num in each :\n");
+    int total=0;
+    for(int j=0; j<DIM; j++){
+        total += fin_arr[j];
+        printf("%d : %d\n", j, fin_arr[j]);
+    }
+    printf("Took %d iterations, cycles = %ld, total = %d\n", 
+            config.total_iterations, t1 - t0, total);
 
 	free(config.clusters);
 }

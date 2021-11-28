@@ -58,6 +58,7 @@
 /* Our defines */
 #define DIM (8)
 #define DISTANCE_KERNEL_NUM_POINTS (7)
+#define CENTROID_KERNEL_NUM_POINTS (8)
 
 typedef enum {
 	KMEANS_OK,
@@ -79,9 +80,12 @@ typedef float (*kmeans_distance_method) (struct kmeans_config *config);
 * @param cluster the cluster number we are actually generating a centroid for here
 * @param centroid the object to write the centroid result into (already allocated)
 */
-typedef void (*kmeans_centroid_method) (float* objs, int * clusters, size_t num_objs, int cluster, float* centroid);
+typedef void (*kmeans_centroid_method) (struct kmeans_config *config);
+typedef void (*kmeans_means_method) (struct kmeans_config *config);
 typedef int (*kmeans_convergence_method) (const float *new_centres, const float* old_centers, int num_centres);
-typedef void (*kmeans_transpose_method) (float* transposed, float* objs, int num_objs);
+typedef void (*kmeans_transpose_method)(float *transpose, float *objs, int num_objs, 
+        int src_offset, int src_increment, 
+        int dst_offset, int dst_increment);
 
 typedef struct kmeans_config
 {
@@ -90,6 +94,8 @@ typedef struct kmeans_config
 
 	/* Function returns the "centroid" of a collection of objects */
 	kmeans_centroid_method centroid_method;
+
+	kmeans_means_method means_method;
 
     /* Function returns 0 on convergence, else 1 */
     kmeans_convergence_method convergence_method;
@@ -130,6 +136,9 @@ typedef struct kmeans_config
 
     float *transpose_arr;
     float *distance_arr;
+    float *distance_transpose_arr;
+    float *mask_arr;
+    float one;
 } kmeans_config;
 
 /* This is where the magic happens. */

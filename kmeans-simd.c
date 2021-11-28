@@ -26,6 +26,16 @@ static void update_distances(kmeans_config *config)
     (config->distance_method)(config);
 }
 
+static void update_distances_transpose(kmeans_config *config)
+{
+    /* This handles computation for 2 cluster */
+    (config->transpose_method)(config->distance_transpose_arr, 
+            config->distance_arr, config->num_objs*config->k, 
+            config->num_objs, DIM,
+            8, DIM*8);
+
+}
+
 #if 0
 static void
 update_r(kmeans_config *config)
@@ -75,21 +85,16 @@ update_r(kmeans_config *config)
 }
 #endif
 
+static void update_centers(kmeans_config *config)
+{
+    /* Get masks for all points */
+    (config->centroid_method)(config);
+}
+
 static void
 update_means(kmeans_config *config)
 {
-	int i;
-
-	for (i = 0; i < config->k; i++)
-	{
-		/* Update the centroid for this cluster */
-		(config->centroid_method)(config->objs, config->clusters, config->num_objs, i, 
-                config->centers + i*DIM);
-#ifdef DEBUG_PRINT
-        printf("New centroid %d: [%f, %f]\n", i, (config->centers + i*DIM)[0], 
-                (config->centers + i*DIM)[1]);
-#endif
-	}
+    (config->means_method)(config);
 }
 
 kmeans_result
@@ -110,11 +115,16 @@ kmeans(kmeans_config *config)
 	assert(config->k <= config->num_objs);
     assert(config->transpose_arr == NULL);
     assert(config->distance_arr == NULL);
+    assert(config->mask_arr == NULL);
     
     config->transpose_arr = malloc(config->num_objs * sizeof(float) * DIM);
-    config->distance_arr = malloc(config->num_objs * sizeof(float) * DIM * config->k);
+    config->distance_arr = malloc(config->num_objs * sizeof(float) * config->k);
+    config->distance_transpose_arr = malloc(config->num_objs * sizeof(float) * config->k);
+    config->mask_arr = malloc(config->num_objs * sizeof(float) * DIM);
 
-    (config->transpose_method)(config->transpose_arr, config->objs, config->num_objs);
+    (config->transpose_method)(config->transpose_arr, config->objs, config->num_objs,
+            8, DIM*8,
+            config->num_objs, DIM);
 
 	/* Zero out cluster numbers, just in case user forgets */
 	memset(config->clusters, 0, clusters_sz);
@@ -134,9 +144,11 @@ kmeans(kmeans_config *config)
         /* Compute distance of each point from the clusters */
 		update_distances(config);
 
+        /* transpose the distances */
+        //update_distances_transpose(config);
+        
         /* Compute new cluster assignments */
-        /*TODO*/
-		//update_centers(config);
+		update_centers(config);
 
         /* Recompute cluster centers */
 		update_means(config);
@@ -148,7 +160,8 @@ kmeans(kmeans_config *config)
 
         /* NOTE : We don't care about convergence. Only max_iterations */
 
-		if (iterations++ > config->max_iterations)
+        iterations++;
+		if (iterations >= config->max_iterations)
 		{
 			kmeans_free(clusters_last);
 			config->total_iterations = iterations;
