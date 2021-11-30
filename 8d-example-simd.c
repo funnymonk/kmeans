@@ -323,7 +323,7 @@ static void compare_8_kernel(float *dest, float *d_src, int d_offset)
  * */
 static void d_centroid(kmeans_config *config)
 {
-//#pragma omp parallel for
+#pragma omp parallel for 
     for(int i=0; i<config->num_objs/CENTROID_KERNEL_NUM_POINTS; i++){
         int d_offset = config->num_objs;
         float *dest = config->mask_arr + i*CENTROID_KERNEL_NUM_POINTS*DIM;
@@ -563,7 +563,7 @@ main(int nargs, char **args)
 {
     unsigned long long t0, t1;
     t0 = rdtsc();
-    for(int i=0; i<1; i++)
+    for(int i=0; i<10; i++)
     {
         printf("iteration %d\n", i);
         run_kmeans();
