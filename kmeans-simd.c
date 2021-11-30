@@ -22,68 +22,19 @@
 
 static void update_distances(kmeans_config *config)
 {
-    /* This handles computation for 2 cluster */
+    /* This handles computation for 8 cluster */
     (config->distance_method)(config);
 }
 
 static void update_distances_transpose(kmeans_config *config)
 {
-    /* This handles computation for 2 cluster */
+    /* This handles computation for 8 cluster */
     (config->transpose_method)(config->distance_transpose_arr, 
             config->distance_arr, config->num_objs*config->k, 
             config->num_objs, DIM,
             8, DIM*8);
 
 }
-
-#if 0
-static void
-update_r(kmeans_config *config)
-{
-	int i;
-
-	for (i = 0; i < config->num_objs; i++)
-	{
-		double distance, curr_distance;
-		int cluster, curr_cluster;
-		float* obj;
-
-		assert(config->objs != NULL);
-		assert(config->num_objs > 0);
-		assert(config->centers);
-		assert(config->clusters);
-
-		obj = config->objs + i*DIM;
-
-		/* Initialize with distance to first cluster */
-		curr_distance = (config->distance_method)(obj, config->centers);
-		curr_cluster = 0;
-
-		/* Check all other cluster centers and find the nearest */
-		for (cluster = 1; cluster < config->k; cluster++)
-		{
-			distance = (config->distance_method)(obj, config->centers + cluster*DIM);
-#ifdef DEBUG_PRINT
-            printf("Distance of [%f, %f] from cluster %d = [%f, %f] = %f. Current : %f\n",
-                    obj[0], obj[1], 
-                    cluster,
-                    (config->centers + cluster*DIM)[0],
-                    (config->centers + cluster*DIM)[1],
-                    distance,
-                    curr_distance);
-#endif
-			if (distance < curr_distance)
-			{
-				curr_distance = distance;
-				curr_cluster = cluster;
-			}
-		}
-
-		/* Store the nearest cluster this object is in */
-		config->clusters[i] = curr_cluster;
-	}
-}
-#endif
 
 static void update_centers(kmeans_config *config)
 {
@@ -117,10 +68,10 @@ kmeans(kmeans_config *config)
     assert(config->distance_arr == NULL);
     assert(config->mask_arr == NULL);
     
-    config->transpose_arr = malloc(config->num_objs * sizeof(float) * DIM);
-    config->distance_arr = malloc(config->num_objs * sizeof(float) * config->k);
-    config->distance_transpose_arr = malloc(config->num_objs * sizeof(float) * config->k);
-    config->mask_arr = malloc(config->num_objs * sizeof(float) * DIM);
+    posix_memalign(&config->transpose_arr, 64, config->num_objs * sizeof(float) * DIM);
+    posix_memalign(&config->distance_arr, 64, config->num_objs * sizeof(float) * config->k);
+    posix_memalign(&config->distance_transpose_arr, 64, config->num_objs * sizeof(float) * config->k);
+    posix_memalign(&config->mask_arr, 64, config->num_objs * sizeof(float) * DIM);
 
     (config->transpose_method)(config->transpose_arr, config->objs, config->num_objs,
             8, DIM*8,
@@ -143,9 +94,6 @@ kmeans(kmeans_config *config)
 	{
         /* Compute distance of each point from the clusters */
 		update_distances(config);
-
-        /* transpose the distances */
-        //update_distances_transpose(config);
         
         /* Compute new cluster assignments */
 		update_centers(config);

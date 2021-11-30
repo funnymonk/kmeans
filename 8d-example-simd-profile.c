@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include "immintrin.h"
 #include <assert.h>
-#include <omp.h>
 
 #include "kmeans-simd.h"
 //#include "dataset.h"
@@ -34,14 +33,6 @@
 #endif
 #define ARRAY_LEN(X)    (sizeof(X)/sizeof((X)[0]))
 
-
-#define DEBUG
-#ifdef DEBUG
-#define dbg_printf  printf
-#else
-#define dbg_printf(...)
-#endif
-
 //timing routine for reading the time stamp counter
 static __inline__ unsigned long long rdtsc(void) {
   unsigned hi, lo;
@@ -49,7 +40,38 @@ static __inline__ unsigned long long rdtsc(void) {
   return ( (unsigned long long)lo)|( ((unsigned long long)hi)<<32 );
 }
 
-/* Unreadable transpose function. Works though :) */
+//Transpose called only once, no point measuring
+//#define TRANSPOSE_PROFILE
+#define DISTANCE_PROFILE
+#define COMPARE_PROFILE
+#define MEANS_PROFILE
+
+unsigned long long transpose_t0, transpose_t1, transpose_sum;
+unsigned long long distance_t0, distance_t1, distance_sum;
+unsigned long long compare_t0, compare_t1, compare_sum;
+unsigned long long means_t0, means_t1, means_sum;
+
+static void print_kernel_flops(kmeans_config *config)
+{
+    int iters = config->max_iterations;
+#ifdef TRANSPOSE_PROFILE
+    printf("Transpose kernel -- Theoretical max : %f | Acheived : %f\n",
+            8.0, (float)(config->num_objs*8*8)/((float)transpose_sum/iters));
+#endif
+#ifdef DISTANCE_PROFILE
+    printf("Distance kernel -- Theoretical max : %f | Acheived : %f\n",
+            24.0, (float)(config->num_objs*DIM*3*config->k)/((float)distance_sum/iters));
+#endif
+#ifdef COMPARE_PROFILE
+    printf("Compare kernel -- Theoretical max : %f | Acheived : %f\n",
+            16.0, (float)(config->num_objs*(8*8 + 14 + 16))/((float)compare_sum/iters));
+#endif
+#ifdef MEANS_PROFILE
+    printf("Means kernel -- Theoretical max : %f | Acheived : %f\n",
+            16.0, (float)(config->num_objs*DIM*2)/((float)means_sum/iters));
+#endif
+}
+
 static void transpose_8_kernel(float *dest, float *src, int src_offset, int dst_offest)
 {
     register __m256i r0, r1, r2, r3, r4, r5, r6, r7;
@@ -118,19 +140,42 @@ static void d_transpose(float *transpose, float *objs, int num_objs,
         int dst_offset, int dst_increment)
 {
 
-    float *dest;
-    float *src;
-    int n = 0;
+    unsigned long long t0, t1;
+    printf("Num = %d\n", num_objs);
+    /* Procedure : 
+     * 1. Load 8 values
+     * 2.
+     * */
+#ifdef TRANSPOSE_PROFILE
+    transpose_t0 = rdtsc();
+#endif
+        float *dest;
+        float *src;
+        int n = 0;
+        
+        for(n=0; n<num_objs/DIM; n++){
+            src = objs + n*src_increment;
+            dest = transpose + n*dst_increment;
+            transpose_8_kernel(dest, src, src_offset, dst_offset);
+        }
+#ifdef TRANSPOSE_PROFILE
+    transpose_t1 = rdtsc();
+    transpose_sum += transpose_t1 - transpose_t0;
+#endif
     
-    for(n=0; n<num_objs/DIM; n++){
-        src = objs + n*src_increment;
-        dest = transpose + n*dst_increment;
-        transpose_8_kernel(dest, src, src_offset, dst_offset);
-    }
 
+#if 0
+    for(int i=0; i<num_objs; i++){
+        printf("row %d : ", i);
+        for(int j=0; j<DIM; j++){
+            printf("%f  ", *(transpose + i*DIM + j));
+        }
+        printf("\n");
+    }
+    assert(0);
+#endif
 }
 
-/* Compute distance of 56 points(in 7 vectors) */
 static void distance_7_kernel(float *dest, float *src, float *c_src, int src_offset)
 {
     register __m256 c;
@@ -159,6 +204,8 @@ static void distance_7_kernel(float *dest, float *src, float *c_src, int src_off
         r5 = _mm256_loadu_ps(src+40);
         r6 = _mm256_loadu_ps(src+48);
 
+        //DEBUGF(r0);
+        //DEBUGF(r6);
         /* Get diff */
         r0 = _mm256_sub_ps(r0, c);
         r1 = _mm256_sub_ps(r1, c);
@@ -183,6 +230,7 @@ static void distance_7_kernel(float *dest, float *src, float *c_src, int src_off
         src += src_offset;
     }
 
+    //DEBUGF(acc0);
 
     /* Now store out computed distance for this cluster */
     _mm256_storeu_ps(dest, acc0);
@@ -199,22 +247,43 @@ static void distance_7_kernel(float *dest, float *src, float *c_src, int src_off
 static float d_distance(kmeans_config *config)
 {
     int i;
+    float *src;
+    float *dest;
+    int src_offset = config->num_objs;
 
-#pragma omp parallel for 
+#ifdef DISTANCE_PROFILE
+    distance_t0 = rdtsc();
+#endif
     for(int k=0; k < config->k; k++) {
         for(int j=0; j<config->num_objs/(DIM*DISTANCE_KERNEL_NUM_POINTS); j++){
-            int src_offset = config->num_objs;
-            float *src = config->transpose_arr + j*DIM*DISTANCE_KERNEL_NUM_POINTS;
-            float *dest = config->distance_arr + k*config->num_objs + j*DIM*DISTANCE_KERNEL_NUM_POINTS;
+            src = config->transpose_arr + j*DIM*DISTANCE_KERNEL_NUM_POINTS;
+            dest = config->distance_arr + k*config->num_objs + j*DIM*DISTANCE_KERNEL_NUM_POINTS;
             distance_7_kernel(dest, src, config->centers + k*DIM, src_offset);
         }
     }
+#ifdef DISTANCE_PROFILE
+    distance_t1 = rdtsc();
+    distance_sum += distance_t1 - distance_t0;
+#endif
+#if 0
+    printf("First and last distances\n");
+    for(int i =0; i<config->k; i++){
+        printf("for i = %d\n", i);
+        for(int j=0; j<DIM; j++){
+            printf("%f  ", config->distance_arr[i*config->num_objs + j]);
+        }
+        printf("\n");
+        for(int j=0; j<DIM; j++){
+            printf("%f  ", config->distance_arr[i*config->num_objs + config->num_objs-DIM+j]);
+        }
+        printf("\n");
+    }
+    assert(0);
+#endif
+
 }
 
-/* Kernel to find the closest cluster (min operation)
- * It then outputs a mask vector, with the cluster it 
- * belongs to having the value 1.0, and remaining as 0 */
-static void compare_8_kernel(float *dest, float *d_src, int d_offset)
+static void compare_8_kernel(float *dest, float *d_src, float *dt_src, int d_offset)
 {
     register __m256 r0, r1, r2, r3, r4, r5, r6, r7;
     register __m256 t0, t1, t2, t3, t4, t5, t6, t7;
@@ -239,7 +308,7 @@ static void compare_8_kernel(float *dest, float *d_src, int d_offset)
     t4 = _mm256_min_ps(t4, t6); 
     min = _mm256_min_ps(t0, t4); 
 
-    /* Perform transpose of distances */
+    /* Perform transpose */
     t0 = (__m256)_mm256_unpacklo_epi32((__m256i)r0, (__m256i)r1);
     t1 = (__m256)_mm256_unpackhi_epi32((__m256i)r0, (__m256i)r1);
     t2 = (__m256)_mm256_unpacklo_epi32((__m256i)r2, (__m256i)r3);
@@ -318,29 +387,59 @@ static void compare_8_kernel(float *dest, float *d_src, int d_offset)
     _mm256_storeu_ps(dest+7*8, r2);
 }
 
-/* Compute new cluster assignments
- * Outputs a mask for assignments 
- * */
 static void d_centroid(kmeans_config *config)
 {
-//#pragma omp parallel for
+#ifdef COMPARE_PROFILE
+    compare_t0 = rdtsc();
+#endif
+    int d_offset = config->num_objs;
+    float *dest;
+    float *d_src;
+    float *dt_src;
     for(int i=0; i<config->num_objs/CENTROID_KERNEL_NUM_POINTS; i++){
-        int d_offset = config->num_objs;
-        float *dest = config->mask_arr + i*CENTROID_KERNEL_NUM_POINTS*DIM;
-        float *d_src = config->distance_arr + i*DIM;
-        compare_8_kernel(dest, d_src, d_offset);
+        dest = config->mask_arr + i*CENTROID_KERNEL_NUM_POINTS*DIM;
+        d_src = config->distance_arr + i*DIM;
+        dt_src = config->distance_transpose_arr + i*CENTROID_KERNEL_NUM_POINTS*DIM;
+        compare_8_kernel(dest, d_src, dt_src, d_offset);
     }
+#ifdef COMPARE_PROFILE
+    compare_t1 = rdtsc();
+    compare_sum += compare_t1 - compare_t0;
+#endif
+#if 0
+    printf("Mask arr : \n");
+    for(int i=0; i<8;i++){
+        printf("At i=%d\n", i);
+        for(int j=0; j<DIM;j++){
+            printf("%d : %f\n", i, config->mask_arr[i*DIM + j]);
+        }
+    }
+    printf("Last Mask arr : \n");
+    for(int i=0; i<8;i++){
+        printf("At i=%d\n", i);
+        for(int j=0; j<DIM;j++){
+            printf("%d : %f\n", i, config->mask_arr[config->num_objs*DIM - DIM*DIM + i*DIM + j]);
+        }
+    }
+    assert(0);
+#endif
 }
 
 static void d_means(kmeans_config *config)
 {
-    float *dest;
+    float *src, *dest, *msrc;
     register __m256 c0, c1, c2, c3, c4, c5, c6, c7;
+    register __m256 mask;
     register __m256 macc;
+    register __m256 r0, r1, r2, r3, r4;
     float *d;
 
     unsigned long long t0, t1;
         
+#ifdef MEANS_PROFILE
+    means_t0 = rdtsc();
+    for(int z=0; z<1; z++){
+#endif
     c0 = _mm256_setzero_ps();
     c1 = _mm256_setzero_ps();
     c2 = _mm256_setzero_ps();
@@ -351,14 +450,9 @@ static void d_means(kmeans_config *config)
     c7 = _mm256_setzero_ps();
     macc = _mm256_setzero_ps();
 
-    /* Start of kernel
-     * Each iteration of the loop accumulates
-     * the 8 dimensions of a single point */
     for(int i=0; i<config->num_objs; i++){
-        register __m256 r0, r1, r2, r3, r4;
-        register __m256 mask;
-        float *msrc = config->mask_arr + i*DIM;
-        float *src = config->objs + i*DIM;
+        msrc = config->mask_arr + i*DIM;
+        src = config->objs + i*DIM;
 
         /* Add dimensions for 1 point*/
         mask = _mm256_loadu_ps(msrc);
@@ -383,19 +477,18 @@ static void d_means(kmeans_config *config)
 
         macc = _mm256_add_ps(mask, macc);
     }
+#ifdef MEANS_PROFILE
+    }
+    means_t1 = rdtsc();
+    means_sum += means_t1 - means_t0;
+    //printf("Means kernel -- Theoretical max : %f | Acheived : %f\n",
+    //        16.0, (float)(config->num_objs*DIM*2)/((float)means_sum/10000));
+    //assert(0);
+#endif
 
-    /* Now we have sum of all dimensions of all points.
-     * c0 stores sum of x dimensions of 8 clusters,
-     * c1 stores sum of y dimensions of 8 clusters, and so on.
-     * We take the transpose of c0-c7 so that now
-     * c0 will store the new centroid coordinates of Centroid 0
-     * c1 will store the new centroid coordinates of Centroid 1
-     * and so on.(after division, of course)
-     */
     __m256 tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
     __m256 b0, b1, b2, b3, b4, b5, b6, b7;
 
-    /* Take transpose */
     tmp0 = _mm256_unpacklo_ps(c0, c1);
     tmp1 = _mm256_unpackhi_ps(c0, c1);
     tmp2 = _mm256_unpacklo_ps(c2, c3);
@@ -429,9 +522,6 @@ static void d_means(kmeans_config *config)
     b3 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(3));
     b4 = _mm256_permutevar8x32_ps(macc, _mm256_set1_epi32(4));
 
-    /* If nothing assigned to cluster, don't divide(will end
-     * up dividing by 0 otherwise)
-     */
     d = &b0;
     if(d[0])
         tmp0 = _mm256_div_ps(tmp0, b0);
@@ -478,9 +568,9 @@ static void d_means(kmeans_config *config)
 
 }
 
-void run_kmeans(void)
+int
+main(int nargs, char **args)
 {
-    /* Prepare configs, and call kmeans */
     unsigned long long t0, t1; 
 	float c[][8] = {
         {1.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0},
@@ -496,7 +586,7 @@ void run_kmeans(void)
 	kmeans_result result;
 	int i, dim, num_in_0;
 
-	config.num_objs = ARRAY_LEN(dataset);
+	config.num_objs = 56*100;//ARRAY_LEN(dataset);
 	config.k = 8;
 	config.max_iterations = 1000;
 	config.distance_method = d_distance;
@@ -507,6 +597,7 @@ void run_kmeans(void)
     config.distance_arr = NULL; 
     config.mask_arr = NULL; 
 
+    printf("%d\n", config.num_objs);
 	config.clusters = malloc(config.num_objs * sizeof(int));
     if(config.clusters == NULL){
         assert(1);
@@ -517,7 +608,7 @@ void run_kmeans(void)
 
 	/* run k-means */
     t0 = rdtsc();
-    result = kmeans(&config);
+	result = kmeans(&config);
     t1 = rdtsc();
 
     int fin_arr[DIM] = {0};
@@ -535,40 +626,25 @@ void run_kmeans(void)
 	}
 
 	for (i = 0; i < config.k; i++){
-        dbg_printf("Centroid %d [", i);
+        printf("Centroid %d [", i);
         float *center = config.centers + i*DIM;
         for(dim = 0; dim<DIM; dim++){
-            dbg_printf("%f, ", center[dim]);
+            printf("%f, ", center[dim]);
         }
-        dbg_printf("]\n");
+        printf("]\n");
     }
-    dbg_printf("Num in each :\n");
+    printf("Num in each :\n");
     int total=0;
     for(int j=0; j<DIM; j++){
         total += fin_arr[j];
-        dbg_printf("%d : %d\n", j, fin_arr[j]);
+        printf("%d : %d\n", j, fin_arr[j]);
     }
-    dbg_printf("Took %d iterations, cycles = %ld, total = %d\n", 
+    printf("Took %d iterations, cycles = %ld, total = %d\n", 
             config.total_iterations, t1 - t0, total);
-
+    print_kernel_flops(&config);
     free(config.transpose_arr);
     free(config.distance_arr);
     free(config.distance_transpose_arr);
     free(config.mask_arr);
 	free(config.clusters);
-}
-
-int
-main(int nargs, char **args)
-{
-    unsigned long long t0, t1;
-    t0 = rdtsc();
-    for(int i=0; i<1; i++)
-    {
-        printf("iteration %d\n", i);
-        run_kmeans();
-    }
-    t1 = rdtsc();
-    printf("Took cycles = %ld\n", 
-            t1 - t0);
 }

@@ -116,11 +116,6 @@ kmeans(kmeans_config *config)
 
 	while (1)
 	{
-#if 0
-		/* Store the previous state of the clustering */
-		memcpy(clusters_last, config->clusters, clusters_sz);
-#endif
-
 		update_r(config);
 		update_means(config);
 
@@ -130,23 +125,9 @@ kmeans(kmeans_config *config)
 		 */
 
         /* NOTE : We don't care about convergence. Only max_iterations */
-#if 0
-		if (memcmp(clusters_last, config->clusters, clusters_sz) == 0)
-		{
-			kmeans_free(clusters_last);
-			config->total_iterations = iterations;
-			return KMEANS_OK;
-		}
 
-        if((config->convergence_method)(config->centers, config->next_centers, config->k) == 0)
-        {
-			kmeans_free(clusters_last);
-			config->total_iterations = iterations;
-			return KMEANS_OK;
-        }
-#endif
-
-		if (iterations++ > config->max_iterations)
+        iterations++;
+		if (iterations >= config->max_iterations)
 		{
 			kmeans_free(clusters_last);
 			config->total_iterations = iterations;
