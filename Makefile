@@ -2,7 +2,9 @@ OBJS=kmeans.o
 SIMDOBJS=kmeans-simd.o
 EXE=8d-example 8d-example-simd 
 
+CDBG +=
 CFLAGS=-O3 -std=c99 -mfma -mavx -mavx2 -fopenmp
+CFLAGS += $(CDBG)
 
 all: $(EXE)
 
