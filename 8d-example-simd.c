@@ -561,7 +561,7 @@ main(int nargs, char **args)
 {
     unsigned long long t0, t1;
     t0 = rdtsc();
-    for(int i=0; i<10; i++)
+    for(int i=0; i<1; i++)
     {
         printf("iteration %d\n", i);
         run_kmeans();
