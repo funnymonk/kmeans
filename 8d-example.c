@@ -2,8 +2,6 @@
 #include <stdio.h>
 
 #include "kmeans.h"
-//#include "dataset.h"
-//#include "dataset_8d.h"
 #include "dataset_test.h"
 
 #define ARRAY_LEN(X)    (sizeof(X)/sizeof((X)[0]))

@@ -5,8 +5,6 @@
 #include <omp.h>
 
 #include "kmeans-simd.h"
-//#include "dataset.h"
-//#include "dataset_8d.h"
 #include "dataset_test.h"
 
 #if 1
